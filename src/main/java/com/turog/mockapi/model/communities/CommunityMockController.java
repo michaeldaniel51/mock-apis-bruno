@@ -14,10 +14,35 @@ import java.util.stream.Collectors;
 public class CommunityMockController {
 
 
-    // Dynamic data stores
-    private final List<Map<String, Object>> communityDatabase = new CopyOnWriteArrayList<>();
-    private final List<Map<String, Object>> inviteDatabase = new CopyOnWriteArrayList<>();
+    // Dynamic data stores with startup data
+    private final List<Map<String, Object>> communityDatabase = new CopyOnWriteArrayList<>(new ArrayList<>(List.of(
+            new HashMap<>(Map.of(
+                    "community_id", "COM001",
+                    "name", "Tech Innovators",
+                    "description", "A hub for software developers and tech enthusiasts.",
+                    "category", "Technology",
+                    "status", "Active",
+                    "created_at", "2025-01-10T09:00:00Z"
+            )),
+            new HashMap<>(Map.of(
+                    "community_id", "COM002",
+                    "name", "Lagos Startup Network",
+                    "description", "Connecting entrepreneurs across Nigeria.",
+                    "category", "Business",
+                    "status", "Active",
+                    "created_at", "2025-02-15T14:30:00Z"
+            ))
+    )));
 
+    private final List<Map<String, Object>> inviteDatabase = new CopyOnWriteArrayList<>(new ArrayList<>(List.of(
+            new HashMap<>(Map.of(
+                    "invite_id", "INV101",
+                    "community_id", "COM001",
+                    "email", "newuser@example.com",
+                    "status", "Pending",
+                    "sent_at", "2025-09-01T10:00:00Z"
+            ))
+    )));
     // 1. Add New Community - POST /communities/account
     @PostMapping("/account")
     public ResponseEntity<Map<String, Object>> addNewCommunity(@RequestBody Map<String, Object> request) {
@@ -54,16 +79,51 @@ public class CommunityMockController {
         ));
     }
 
-    // 3. Search Community - GET /communities/accounts/search
+    // 3. Search Community - GET /communities/accounts/search?name=tech&page=1&page_size=10
     @GetMapping("/accounts/search")
-    public ResponseEntity<Map<String, Object>> searchCommunity(@RequestParam String name) {
-        List<Map<String, Object>> results = communityDatabase.stream()
+    public ResponseEntity<Map<String, Object>> searchCommunity(
+            @RequestParam String name,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
+
+        // 1. Validation: If name is blank, return empty list instead of full DB
+        if (name.trim().isEmpty()) {
+            return ResponseEntity.ok(Map.of(
+                    "status", "success",
+                    "message", "Search term is empty.",
+                    "data", Map.of("communities", List.of())
+            ));
+        }
+
+        // 2. Filter logic
+        List<Map<String, Object>> filteredResults = communityDatabase.stream()
                 .filter(c -> String.valueOf(c.get("name")).toLowerCase().contains(name.toLowerCase()))
                 .toList();
 
-        return ResponseEntity.ok(Map.of("status", "success", "data", results));
-    }
+        int totalRecords = filteredResults.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+        int start = (page - 1) * page_size;
 
+        // 3. Apply Pagination (Skip/Limit)
+        List<Map<String, Object>> pagedResults = filteredResults.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
+
+        return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Search results retrieved.",
+                "data", Map.of(
+                        "communities", pagedResults,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
+                )
+        ));
+    }
     // 4. View Community Detail - GET /communities/account/{community_id}
     @GetMapping("/account/{community_id}")
     public ResponseEntity<Map<String, Object>> viewCommunityDetail(@PathVariable String community_id) {
@@ -140,17 +200,40 @@ public class CommunityMockController {
     public ResponseEntity<Map<String, Object>> acceptInvite(@RequestBody Map<String, Object> request) {
         String inviteId = String.valueOf(request.get("invite_id"));
 
-        // Simulating the user joining a community
-        return ResponseEntity.ok(Map.of(
-                "status", "success",
-                "message", "Invite accepted.",
-                "data", Map.of(
-                        "community_id", "COM001",
+        // In a real mock, we assume INV001 belongs to COM001
+        String targetCommunityId = "COM001";
+
+        // Find the community and update its member list
+        for (Map<String, Object> community : communityDatabase) {
+            if (community.get("community_id").equals(targetCommunityId)) {
+
+                // Get existing members or create list if it doesn't exist
+                List<Map<String, Object>> members = (List<Map<String, Object>>) community.getOrDefault("members", new ArrayList<Map<String, Object>>());
+
+                Map<String, Object> newMember = new HashMap<>(Map.of(
                         "member_id", "MBR" + (System.currentTimeMillis() % 1000),
                         "role", "Member",
+                        "status", "Active",
                         "joined_at", ZonedDateTime.now().toString()
-                )
-        ));
+                ));
+
+                members.add(newMember);
+                community.put("members", members); // Save it back to the map
+
+                return ResponseEntity.ok(Map.of(
+                        "status", "success",
+                        "message", "Invite accepted.",
+                        "data", Map.of(
+                                "community_id", targetCommunityId,
+                                "member_id", newMember.get("member_id"),
+                                "role", newMember.get("role"),
+                                "joined_at", newMember.get("joined_at")
+                        )
+                ));
+            }
+        }
+
+        return ResponseEntity.status(404).body(Map.of("status", "error", "message", "Community not found"));
     }
 
     // 8. Delete Community - DELETE /communities/profile/remove/{community_id}
@@ -227,7 +310,7 @@ public class CommunityMockController {
         List<Map<String, Object>> pendingInvites = inviteDatabase.stream()
                 .filter(invite -> String.valueOf(invite.get("community_id")).equals(communityId))
                 .filter(invite -> "Pending".equalsIgnoreCase(String.valueOf(invite.get("status"))))
-                .collect(Collectors.toList());
+                .toList();
 
         return ResponseEntity.ok(Map.of(
                 "status", "success",
@@ -276,19 +359,26 @@ public class CommunityMockController {
     }
 
     // 14. View Member List - POST /communities/account/members
-// Using POST with body as per your requirement
-    @PostMapping("/account/members")
-    public ResponseEntity<Map<String, Object>> viewMemberList(@RequestBody Map<String, Object> request) {
-        String communityId = String.valueOf(request.get("community_id"));
+    // Note: Usually GET requests don't have bodies.
+// If your frontend requires a body, stay with @RequestBody, otherwise use @RequestParam
+    @GetMapping("/account/members")
+    public ResponseEntity<Map<String, Object>> viewMemberList(@RequestParam String community_id) {
 
-        // Find community and return its members
         Optional<Map<String, Object>> community = communityDatabase.stream()
-                .filter(c -> c.get("community_id").equals(communityId))
+                .filter(c -> c.get("community_id").equals(community_id))
                 .findFirst();
+
+        List<Map<String, Object>> members = community
+                .map(c -> (List<Map<String, Object>>) c.get("members"))
+                .orElse(new ArrayList<>());
 
         return ResponseEntity.ok(Map.of(
                 "status", "success",
-                "data", community.map(c -> c.get("members")).orElse(new ArrayList<>())
+                "message", "Members retrieved successfully.",
+                "data", Map.of(
+                        "community_id", community_id,
+                        "members", members
+                )
         ));
     }
 
@@ -332,6 +422,49 @@ public class CommunityMockController {
                     "message", "Community not found or already deleted."
             ));
         }
+    }
+    @DeleteMapping("/account/members")
+    public ResponseEntity<Map<String, Object>> removeMember(@RequestBody Map<String, Object> request) {
+        String communityId = String.valueOf(request.get("community_id"));
+        String memberId = String.valueOf(request.get("member_id"));
+
+        // 1. Find the community in the database
+        Optional<Map<String, Object>> communityOpt = communityDatabase.stream()
+                .filter(c -> String.valueOf(c.get("community_id")).equals(communityId))
+                .findFirst();
+
+        if (communityOpt.isPresent()) {
+            Map<String, Object> community = communityOpt.get();
+
+            // 2. Get the members list from the community map
+            Object membersObj = community.get("members");
+
+            if (membersObj instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> members = (List<Map<String, Object>>) membersObj;
+
+                // 3. Remove the member with the matching ID
+                boolean removed = members.removeIf(m -> String.valueOf(m.get("member_id")).equals(memberId));
+
+                if (removed) {
+                    return ResponseEntity.ok(Map.of(
+                            "status", "success",
+                            "message", "Member removed successfully."
+                    ));
+                } else {
+                    return ResponseEntity.status(404).body(Map.of(
+                            "status", "error",
+                            "message", "Member ID not found in this community."
+                    ));
+                }
+            }
+        }
+
+        // 4. Fallback if community or members list doesn't exist
+        return ResponseEntity.status(404).body(Map.of(
+                "status", "error",
+                "message", "Community not found or has no members."
+        ));
     }
 
 }

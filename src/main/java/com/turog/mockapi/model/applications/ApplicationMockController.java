@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/applications")
+@CrossOrigin(origins = "*")
 public class ApplicationMockController {
 
     // 1. Global Application Catalog
@@ -22,15 +23,36 @@ public class ApplicationMockController {
             new HashMap<>(Map.of("client_id", "CL001", "application_id", "APP001", "status", "Active", "settings", Map.of("theme", "light")))
     )));
 
-    // 1. List Applications - GET /applications/clients
+    // 1. List Applications - GET /applications/clients?page=1&page_size=10
     @GetMapping("/clients")
-    public ResponseEntity<Map<String, Object>> listApplications() {
+    public ResponseEntity<Map<String, Object>> listApplications(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
+
+        // 1. Calculate the starting point (offset) based on page number
+        int start = (page - 1) * page_size;
+
+        // 2. Extract the sublist for the current page
+        List<Map<String, Object>> pagedList = globalAppsDb.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
+
+        // 3. Calculate metadata
+        int totalRecords = globalAppsDb.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Applications retrieved successfully.",
                 "data", Map.of(
-                        "applications", globalAppsDb,
-                        "pagination", Map.of("page", 1, "page_size", 10, "total_records", globalAppsDb.size(), "total_pages", 1)
+                        "applications", pagedList,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
                 )
         ));
     }
@@ -41,7 +63,7 @@ public class ApplicationMockController {
         List<Map<String, Object>> results = globalAppsDb.stream()
                 .filter(app -> app.get("name").toString().toLowerCase().contains(query.toLowerCase()) ||
                         app.get("category").toString().toLowerCase().contains(query.toLowerCase()))
-                .collect(Collectors.toList());
+                .toList();
 
         return ResponseEntity.ok(Map.of("status", "success", "message", "Search completed successfully.", "data", Map.of("applications", results)));
     }

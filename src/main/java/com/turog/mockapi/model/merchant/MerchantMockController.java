@@ -17,15 +17,36 @@ public class MerchantMockController {
             new HashMap<>(Map.of("merchant_id", "MC002", "name", "ZeptoMail", "type", "Email", "status", "Active", "created_at", "2025-06-20T14:30:00Z"))
     ));
 
-    // 1. List Merchants - GET /merchants/subscribed/list
+    // 1. List Merchants - GET /merchants/subscribed/list?page=1&page_size=10
     @GetMapping("/subscribed/list")
-    public ResponseEntity<Map<String, Object>> listMerchants() {
+    public ResponseEntity<Map<String, Object>> listMerchants(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
+
+        // 1. Calculate the starting index
+        int start = (page - 1) * page_size;
+
+        // 2. Slice the merchant database
+        List<Map<String, Object>> pagedMerchants = merchantDb.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
+
+        // 3. Calculate pagination metadata
+        int totalRecords = merchantDb.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Merchants retrieved successfully.",
                 "data", Map.of(
-                        "merchants", merchantDb,
-                        "pagination", Map.of("page", 1, "page_size", 10, "total_records", merchantDb.size(), "total_pages", 1)
+                        "merchants", pagedMerchants,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
                 )
         ));
     }

@@ -8,6 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 @RestController
 @RequestMapping("/documents")
+@CrossOrigin(origins = "*")
 public class DocumentMockController {
 
     // In-memory Document Metadata Database
@@ -30,15 +31,36 @@ public class DocumentMockController {
             ))
     )));
 
-    // 1. List Documents - GET /documents/generic
+    // 1. List Documents - GET /generic?page=1&page_size=10
     @GetMapping("/generic")
-    public ResponseEntity<Map<String, Object>> listDocuments() {
+    public ResponseEntity<Map<String, Object>> listDocuments(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
+
+        // 1. Calculate the starting index (offset)
+        int start = (page - 1) * page_size;
+
+        // 2. Slice the database list
+        List<Map<String, Object>> pagedDocuments = documentDb.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
+
+        // 3. Calculate pagination metadata
+        int totalRecords = documentDb.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Documents retrieved successfully.",
                 "data", Map.of(
-                        "documents", documentDb,
-                        "pagination", Map.of("page", 1, "page_size", 10, "total_records", documentDb.size(), "total_pages", 1)
+                        "documents", pagedDocuments,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
                 )
         ));
     }

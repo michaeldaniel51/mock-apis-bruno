@@ -50,15 +50,36 @@ public class MemberMockController {
 
         return ResponseEntity.status(201).body(response);
     }
-    // 2. Member List - GET /members/profile
+    // 2. Member List - GET /members/profile?page=1&page_size=10
     @GetMapping("/profile")
-    public ResponseEntity<Map<String, Object>> listMember() {
+    public ResponseEntity<Map<String, Object>> listMember(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
+
+        // 1. Calculate the starting index
+        int start = (page - 1) * page_size;
+
+        // 2. Slice the member database
+        List<Map<String, Object>> pagedMembers = memberDatabase.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
+
+        // 3. Calculate metadata
+        int totalRecords = memberDatabase.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Members retrieved successfully.",
                 "data", Map.of(
-                        "members", memberDatabase,
-                        "pagination", Map.of("page", 1, "page_size", 10, "total_records", memberDatabase.size(), "total_pages", 1)
+                        "members", pagedMembers,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
                 )
         ));
     }

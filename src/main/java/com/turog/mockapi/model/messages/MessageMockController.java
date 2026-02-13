@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/messages/internal")
+@CrossOrigin(origins = "*")
 public class MessageMockController {
 
     // In-memory Mailbox Database
@@ -18,36 +19,117 @@ public class MessageMockController {
                     "subject", "Welcome!",
                     "body", "Thank you for joining our platform.",
                     "sender", "system",
-                    "recipient", "user123",
+                    "recipients", List.of("user123"),
+                    "attachments", List.of("welcome_guide.pdf"), // Example attachment
                     "category", "inbox",
                     "timestamp", "2025-09-03T10:00:00Z",
                     "status", "unread"
             ))
     )));
 
-    // 1. List Messages by Category - GET /messages/internal/category
+    // 1. List Messages by Category - GET /messages/internal/category?type=inbox&page=1&page_size=10
+//    @GetMapping("/category")
+//    public ResponseEntity<Map<String, Object>> listMessages(
+//            @RequestParam(defaultValue = "inbox") String type,
+//            @RequestParam(defaultValue = "1") int page,
+//            @RequestParam(defaultValue = "10") int page_size) {
+//
+//        // 1. Filter by category and map to summary (removing body)
+//        List<Map<String, Object>> filtered = messageDb.stream()
+//                .filter(m -> String.valueOf(m.get("category")).equalsIgnoreCase(type))
+//                .map(m -> {
+//                    Map<String, Object> summary = new HashMap<>(m);
+//                    summary.remove("body");
+//                    return summary;
+//                })
+//                .collect(Collectors.toList());
+//
+//        // 2. Calculate pagination logic
+//        int totalRecords = filtered.size();
+//        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+//        int start = (page - 1) * page_size;
+//
+//        // 3. Slice the filtered list
+//        List<Map<String, Object>> pagedMessages = filtered.stream()
+//                .skip(Math.max(0, start))
+//                .limit(page_size)
+//                .toList();
+//
+//        return ResponseEntity.ok(Map.of(
+//                "status", "success",
+//                "message", "Messages retrieved successfully.",
+//                "data", Map.of(
+//                        "messages", pagedMessages,
+//                        "pagination", Map.of(
+//                                "page", page,
+//                                "page_size", page_size,
+//                                "total_records", totalRecords,
+//                                "total_pages", totalPages == 0 ? 1 : totalPages
+//                        )
+//                )
+//        ));
+//    }
+
+    // 1. List Messages by Category - GET /messages/internal/category?type=inbox&page=1&page_size=10
     @GetMapping("/category")
-    public ResponseEntity<Map<String, Object>> listMessages(@RequestParam(defaultValue = "inbox") String type) {
+    public ResponseEntity<Map<String, Object>> listMessages(
+            @RequestParam(defaultValue = "inbox") String type,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
+
+        // 1. Filter by category & convert to Summary (removing body for list view)
         List<Map<String, Object>> filtered = messageDb.stream()
                 .filter(m -> String.valueOf(m.get("category")).equalsIgnoreCase(type))
                 .map(m -> {
-                    // Return summary view (no body)
                     Map<String, Object> summary = new HashMap<>(m);
                     summary.remove("body");
+
+                    // Ensure recipients and attachments are consistently Lists even in summary
+                    summary.putIfAbsent("recipients", List.of());
+                    summary.putIfAbsent("attachments", List.of());
+
                     return summary;
                 })
-                .collect(Collectors.toList());
+                .toList();
 
-        return ResponseEntity.ok(Map.of("messages", filtered));
+        // 2. Pagination Math
+        int totalRecords = filtered.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+        int start = (page - 1) * page_size;
+
+        // 3. Slice the list safely
+        List<Map<String, Object>> pagedMessages = filtered.stream()
+                .skip(Math.max(0, start))
+                .limit(page_size)
+                .toList();
+
+        return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Messages retrieved successfully.",
+                "data", Map.of(
+                        "messages", pagedMessages,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
+                )
+        ));
     }
 
     // 2. Message Details - GET /messages/internal/{message_id}
     @GetMapping("/{message_id}")
     public ResponseEntity<Map<String, Object>> getMessageDetails(@PathVariable String message_id) {
         return messageDb.stream()
-                .filter(m -> m.get("messageId").equals(message_id))
+                .filter(m -> String.valueOf(m.get("messageId")).equals(message_id))
                 .findFirst()
-                .map(ResponseEntity::ok)
+                .map(m -> {
+                    // Defensive check: Ensure attachments is never null in response
+                    Map<String, Object> response = new HashMap<>(m);
+                    response.putIfAbsent("attachments", List.of());
+                    return ResponseEntity.ok(response);
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -57,16 +139,27 @@ public class MessageMockController {
         String newId = "MSG" + String.format("%03d", messageDb.size() + 1);
 
         Map<String, Object> newMessage = new HashMap<>(req);
+
+        // Normalize recipients: Ensure it's a list even if one string is sent
+        Object recipients = req.get("recipients");
+        if (recipients instanceof String) {
+            newMessage.put("recipients", List.of(recipients));
+        }
+
+        // Handle Attachments: Default to empty list if null
+        if (req.get("attachments") == null) {
+            newMessage.put("attachments", List.of());
+        }
+
         newMessage.put("messageId", newId);
         newMessage.put("timestamp", ZonedDateTime.now().toString());
         newMessage.put("status", "unread");
-        newMessage.put("category", "sent"); // Mocking as sent category for the sender
+        newMessage.put("category", "sent");
 
         messageDb.add(newMessage);
 
         return ResponseEntity.ok(Map.of("messageId", newId, "sent", true));
     }
-
     // 4. Mark As Read - PUT /messages/internal/read/{message_id}
     @PutMapping("/read/{message_id}")
     public ResponseEntity<Map<String, Object>> markAsRead(@PathVariable String message_id) {

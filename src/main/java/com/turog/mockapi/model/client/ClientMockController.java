@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/clients")
+@CrossOrigin(origins = "*")
 public class ClientMockController {
 
     // In-memory Database for Clients
@@ -31,45 +32,87 @@ public class ClientMockController {
     @GetMapping("/details")
     public ResponseEntity<Map<String, Object>> listClients(
             @RequestParam(required = false) String search,
-            @RequestParam(required = false) String type) {
+            @RequestParam(required = false) String type,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
 
+        // Logic: Filter, then calculate pagination metadata
         List<Map<String, Object>> filtered = clientDb.stream()
-                .filter(c -> (search == null || c.get("name").toString().contains(search)))
+                .filter(c -> (search == null || c.get("name").toString().toLowerCase().contains(search.toLowerCase())))
                 .filter(c -> (type == null || c.get("type").toString().equalsIgnoreCase(type)))
-                .collect(Collectors.toList());
+                .toList();
+
+        int totalRecords = filtered.size();
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+        int start = (page - 1) * page_size;
+
+        List<Map<String, Object>> pagedClients = filtered.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
 
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Clients retrieved successfully.",
                 "data", Map.of(
-                        "clients", filtered,
-                        "pagination", Map.of("page", 1, "page_size", 10, "total_records", filtered.size(), "total_pages", 1)
+                        "clients", pagedClients,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
                 )
         ));
     }
-
-    // 2. View Client Details - GET /clients/details/{client_id}
     @GetMapping("/details/{client_id}")
     public ResponseEntity<Map<String, Object>> viewClientDetail(@PathVariable String client_id) {
-        // Mocking the deep-nested structure for profile, loan_eligibility, and kyc
+
+        // 1. Find the basic client info from your database
+        Map<String, Object> client = clientDb.stream()
+                .filter(c -> c.get("client_id").equals(client_id))
+                .findFirst()
+                .orElse(null);
+
+        if (client == null) {
+            return ResponseEntity.status(404).body(Map.of("status", "error", "message", "Client not found"));
+        }
+
+        // 2. Build the detailed response using the data from the 'client' object
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Client profile retrieved successfully.",
                 "data", Map.of(
                         "profile", Map.of(
                                 "client_id", client_id,
-                                "name", "Seyi Akamo",
-                                "company", "Kijana International",
-                                "level", "Tier One",
+                                "name", client.get("name"), // Dynamic name
+                                "company", client.getOrDefault("company", "N/A"),
+                                "level", client.getOrDefault("level", "Tier One"),
                                 "transaction_limit", 500000.00,
                                 "daily_limit", 50000.00
                         ),
-                        "loan_eligibility", Map.of("eligible", false, "reason", "User is not eligible for a Loan"),
-                        "loan_compliance", Map.of("pep_sanctions_status", "Failed", "aml_screening_status", "Pending"),
+                        "loan_eligibility", Map.of(
+                                "eligible", false,
+                                "reason", "User is not eligible for a Loan"
+                        ),
+                        "loan_compliance", Map.of(
+                                "pep_sanctions_status", "Failed",
+                                "company_screening_status", "Passed",
+                                "aml_screening_status", "Pending"
+                        ),
                         "kyc_compliance", Map.of(
-                                "address", "No1, Olujobi Ijoka, Lagos, Nigeria",
+                                "address", client.getOrDefault("location", "Lagos, Nigeria"),
+                                "dob", "1990-08-29",
+                                "phone_number", client.getOrDefault("phone_number", "0000000000"),
+                                "email", client.getOrDefault("email", "email@example.com"),
                                 "verification_status", "Verified",
-                                "id_types", List.of("NIN", "National ID")
+                                "id_types", List.of("NIN", "National ID", "Passport"),
+                                "verification_docs", List.of(
+                                        Map.of("file_name", "doc_verify.pdf", "url", "https://example.com/docs/v1.pdf")
+                                ),
+                                "utility_docs", List.of(
+                                        Map.of("file_name", "utility.pdf", "url", "https://example.com/docs/u1.pdf")
+                                )
                         )
                 )
         ));

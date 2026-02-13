@@ -5,9 +5,11 @@ import org.springframework.web.bind.annotation.*;
 import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/cards")
+@CrossOrigin(origins = "*")
 public class CardMockController {
 
     // In-memory Database for Cards
@@ -25,22 +27,42 @@ public class CardMockController {
             ))
     ));
 
-    // 1. List Client Cards - GET /cards/internal
+    // 1. List Client Cards - GET /cards/internal?client_id=CL001&page=1&page_size=10
     @GetMapping("/internal")
-    public ResponseEntity<Map<String, Object>> listClientCards(@RequestParam(required = false) String client_id) {
-        List<Map<String, Object>> filteredCards = cardDb;
-        if (client_id != null) {
-            filteredCards = cardDb.stream()
-                    .filter(c -> String.valueOf(c.get("client_id")).equals(client_id))
-                    .toList();
-        }
+    public ResponseEntity<Map<String, Object>> listClientCards(
+            @RequestParam(required = false) String client_id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int page_size) {
 
+        // 1. Filter by client_id if provided
+        List<Map<String, Object>> filteredCards = cardDb.stream()
+                .filter(c -> client_id == null || String.valueOf(c.get("client_id")).equals(client_id))
+                .toList();
+
+        int totalRecords = filteredCards.size();
+
+        // 2. Calculate pagination logic
+        int totalPages = (int) Math.ceil((double) totalRecords / page_size);
+        int start = (page - 1) * page_size;
+
+        // 3. Apply Pagination (Skip/Limit based on page)
+        List<Map<String, Object>> pagedCards = filteredCards.stream()
+                .skip(start)
+                .limit(page_size)
+                .toList();
+
+        // 4. Return the response with page-based metadata
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Cards retrieved successfully.",
                 "data", Map.of(
-                        "cards", filteredCards,
-                        "pagination", Map.of("page", 1, "page_size", 10, "total_records", filteredCards.size(), "total_pages", 1)
+                        "cards", pagedCards,
+                        "pagination", Map.of(
+                                "page", page,
+                                "page_size", page_size,
+                                "total_records", totalRecords,
+                                "total_pages", totalPages == 0 ? 1 : totalPages
+                        )
                 )
         ));
     }
